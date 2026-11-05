@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "onnxruntime-node": "1.30.0",
+    "@huggingface/transformers": "4.3.1"
+  },
+  "private": true,
+  "name": "capsnip-swift-hinglish",
+  "type": "module"
+}

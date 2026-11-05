@@ -1,0 +1,5 @@
+faster-whisper>=1.1.0
+ctranslate2>=4.4.0
+# faster-whisper 1.2.1 still passes metadata_errors to av.open; PyAV 19 removed it.
+av>=11,<19
+indic-transliteration>=2.3.82

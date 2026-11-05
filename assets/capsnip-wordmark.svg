@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 252 64" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Capsnip</title>
+  <g transform="translate(4 4)">
+    <rect x="1" y="1" width="54" height="54" rx="17" fill="#121B1F" stroke="#A8DAF2" stroke-opacity=".25"/>
+    <path d="M36 13.8a17.5 17.5 0 1 0 0 32.4" stroke="#A8DAF2" stroke-width="5.5" stroke-linecap="round"/>
+    <path d="m31.2 21.5 15-8.1m-15 21.2 15 8.1" stroke="#8EE9D5" stroke-width="3.8" stroke-linecap="round"/>
+    <circle cx="29.2" cy="32" r="3" fill="#F1FBFF"/>
+    <path d="m47 25 .8 2.2 2.2.8-2.2.8L47 31l-.8-2.2-2.2-.8 2.2-.8L47 25Z" fill="#D5F6FF"/>
+  </g>
+  <text x="70" y="43" fill="#F0F3F4" font-family="DM Sans, Inter, Segoe UI, sans-serif" font-size="32" font-weight="700" letter-spacing="-1.1">capsnip</text>
+  <path d="M226 22v20" stroke="#8EE9D5" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="226" cy="18" r="2" fill="#A8DAF2"/>
+</svg>

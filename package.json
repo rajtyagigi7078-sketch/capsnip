@@ -1,0 +1,14 @@
+{
+  "name": "capsnip-local",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Local desktop caption editor with 68 animated caption styles",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "install:engine": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-engine.ps1"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
+  }
+}
