@@ -13,6 +13,33 @@
 
   let media = null;
   let renderedVideoPath = null;
+  let exportState = 'idle';
+  let exportRequestActive = false;
+  function setExportState(state) {
+    exportState = state;
+    const button = document.getElementById('exportVideoButton');
+    if (button) { button.disabled = state === 'rendering'; button.textContent = state === 'rendering' ? 'Rendering MP4…' : state === 'exported' ? '✓ Exported · Export again' : '✧　Export video'; }
+    const cancel = document.getElementById('cancelRender');
+    if (cancel) { cancel.hidden = state !== 'rendering'; cancel.disabled = false; }
+  }
+  function pauseExportMedia() {
+    video?.pause(); renderedPreviewVideo?.pause(); motionFillVideo.pause();
+    document.getElementById('exportVideoPreview')?.pause();
+    stopCaptionPreviewFrames();
+  }
+  function completeExport(path) {
+    const parts = String(path).replace(/\\/g, '/').split('/');
+    renderedVideoPath = `file:///${parts.map((part,index)=>index===0?part:encodeURIComponent(part)).join('/')}`;
+    pauseExportMedia();
+    const outputVideo = document.getElementById('exportVideoPreview');
+    if (outputVideo) { outputVideo.loop = false; outputVideo.autoplay = false; outputVideo.src = renderedVideoPath; outputVideo.load(); }
+    showRenderedEditorPreview(renderedVideoPath);
+    pauseExportMedia();
+    setExportState('exported');
+    const label = document.getElementById('renderText'), bar = document.getElementById('renderProgressBar');
+    if (label) label.textContent = '✓ Exported · MP4 saved';
+    if (bar) bar.style.width = '100%';
+  }
   let video = null;
   let renderedPreviewVideo = null;
   const motionMaskPreview = document.getElementById('motionMaskPreview');
@@ -164,10 +191,10 @@
   function showRenderedEditorPreview(url){
     clearRenderedEditorPreview();if(!url||!preview)return;
     renderedPreviewVideo=document.createElement('video');renderedPreviewVideo.src=url;renderedPreviewVideo.controls=false;renderedPreviewVideo.playsInline=true;renderedPreviewVideo.preload='metadata';renderedPreviewVideo.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:0;background:#050708';
-    renderedPreviewVideo.addEventListener('loadedmetadata',()=>{preview.querySelector('.preview-label').textContent=`◉ Final MP4 · ${formatTime(renderedPreviewVideo.duration)}`;fitPreviewToSource();});
+    const resultVideo=renderedPreviewVideo;renderedPreviewVideo.addEventListener('loadedmetadata',()=>{if(renderedPreviewVideo!==resultVideo)return;preview.querySelector('.preview-label').textContent=`◉ Final MP4 · ${formatTime(resultVideo.duration)}`;fitPreviewToSource();});
     renderedPreviewVideo.addEventListener('play',()=>{if(document.querySelector('.playmini'))document.querySelector('.playmini').textContent='Ⅱ'});
     renderedPreviewVideo.addEventListener('pause',()=>{if(document.querySelector('.playmini'))document.querySelector('.playmini').textContent='▶'});
-    renderedPreviewVideo.addEventListener('timeupdate',()=>{syncTimeline();updateExportPreview()});preview.insertBefore(renderedPreviewVideo,preview.querySelector('.preview-label'));if(video)video.style.display='none';if(motionMaskPreview)motionMaskPreview.style.display='none';renderedPreviewVideo.load();renderedPreviewVideo.play().catch(()=>{});
+    renderedPreviewVideo.addEventListener('timeupdate',()=>{syncTimeline();updateExportPreview()});preview.insertBefore(renderedPreviewVideo,preview.querySelector('.preview-label'));if(video)video.style.display='none';if(motionMaskPreview)motionMaskPreview.style.display='none';renderedPreviewVideo.loop=false;renderedPreviewVideo.autoplay=false;renderedPreviewVideo.load();
   }
   function clearRenderedEditorPreview(){if(!renderedPreviewVideo)return;const previewTime=renderedPreviewVideo.currentTime;renderedPreviewVideo.pause();renderedPreviewVideo.remove();renderedPreviewVideo=null;if(video){video.style.display='';if(Number.isFinite(previewTime))try{video.currentTime=Math.max(0,Math.min(Number.isFinite(video.duration)?video.duration:previewTime,previewTime))}catch{}}if(preview){const label=preview.querySelector('.preview-label');if(label&&media)label.textContent=`◉ ${media.name}　·　${formatTime(duration)}`}if(video?.videoWidth)fitPreviewToSource();}
   function invalidateCaptionRender(){renderedVideoPath=null;clearRenderedEditorPreview();captionEditsPending=captionSegments.length>0;if(captionEditsPending){const apply=document.getElementById('applyCaptions');if(apply)apply.dataset.applied='false'}updateCaptionApplyButton();updateCaptionPreview();updateExportPreview();}  function fitPreviewToSource(){
@@ -255,7 +282,7 @@
     else{appliedTemplate=null}
     captionSegments=Array.isArray(data.segments)?data.segments:[];captionEditsPending=false;duration=Number(data.duration)||0;setProjectTitle(data.name||'Untitled Project');renderTranscriptRows();
     if(data.mediaPath)loadMedia({path:data.mediaPath,name:data.mediaPath.split(/[\\/]/).pop(),url:data.mediaUrl||`file:///${data.mediaPath.replace(/\\/g,'/')}`},true);
-    if(appliedTemplate)applyTemplatePreview(appliedTemplate);const first=captionSegments[0],track=document.querySelector('.track.caption');if(track)track.textContent=first?`Aa　${formatTime(first.start)}　${first.text}`:'Aa　No captions yet';updateCaptionPreview();go('editor');await refreshProjectHistory();
+    if(appliedTemplate){applyTemplatePreview(appliedTemplate);const apply=document.getElementById('applyCaptions');if(apply){apply.dataset.applied='true';apply.disabled=false}}const first=captionSegments[0],track=document.querySelector('.track.caption');if(track)track.textContent=first?`Aa　${formatTime(first.start)}　${first.text}`:'Aa　No captions yet';updateCaptionPreview();go('editor');await refreshProjectHistory();
   }
   async function openHistoryProject(filePath){try{if(!api.openProjectFromHistory)throw new Error('Project history is unavailable outside the Capsnip desktop app.');const data=await api.openProjectFromHistory(filePath);await applyProjectData(data);toast('Project opened from history')}catch(error){toast(error.message||'Could not open project');await refreshProjectHistory()}}
   document.getElementById('projectHistorySearch')?.addEventListener('input',renderProjectHistory);document.getElementById('projectHistorySort')?.addEventListener('change',renderProjectHistory);
@@ -395,6 +422,7 @@
     const exportFpsChoice=document.getElementById('exportFps')?.value||'60';
     const sourceFpsStream=(()=>{try{return video.captureStream?video.captureStream():video.mozCaptureStream()}catch{return null}})();
     const sourceFps=sourceFpsStream?.getVideoTracks?.()[0]?.getSettings?.().frameRate||30;
+    sourceFpsStream?.getTracks?.().forEach(track=>track.stop());
     const exportFps=exportFpsChoice==='source'?Math.min(60,Math.max(24,Math.round(sourceFps))):Math.min(60,Math.max(24,Number(exportFpsChoice)||60));
     const canvasStream=canvas.captureStream(exportFps);
     const tickOn=document.getElementById('tickEffects')?.classList.contains('on'),includeOriginalAudio=localStorage.getItem('capsnip.includeAudio')!=='false';
@@ -412,7 +440,18 @@
     const label = document.getElementById('renderText');
     status.style.display = 'block';
     button.disabled = true; button.textContent = 'Rendering MP4…';
-    let animationFrame;let lastSfxKey='';
+    let animationFrame;let lastSfxKey='';let recorderFinished=false;
+    const sourceVideo=video;
+    const stopRecorder=()=>{if(recorder.state!=='inactive')recorder.stop()};
+    const cleanupRecording=()=>{
+      cancelAnimationFrame(animationFrame);
+      sourceVideo.removeEventListener('ended',stopRecorder);
+      sourceVideo.pause();motionFillVideo.pause();
+      canvasStream.getTracks().forEach(track=>track.stop());
+      audioMix?.disconnect();
+      if(includeOriginalAudio&&previewAudioSource){try{previewAudioSource.disconnect();previewAudioSource.connect(audioCtx.destination)}catch{}}
+      stopCaptionPreviewFrames();
+    };
     const draw = () => {
       const w = canvas.width, h = canvas.height;
       ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
@@ -431,9 +470,10 @@
       animationFrame = requestAnimationFrame(draw);
     };
     recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
-    recorder.onerror = event => {cancelAnimationFrame(animationFrame);motionExportActive=false;activeCanvasRecorder=null; button.disabled = false; button.textContent = '✧　Export video'; toast(event.error?.message || 'Video export failed'); };
+    recorder.onerror = event => {cancelCanvasRender=true;stopRecorder();cleanupRecording();motionExportActive=false;activeCanvasRecorder=null;setExportState('idle');toast(event.error?.message || 'Video export failed');};
     recorder.onstop = async () => {
-      if(cancelCanvasRender){cancelCanvasRender=false;cancelAnimationFrame(animationFrame);motionExportActive=false;activeCanvasRecorder=null;label.textContent='Export cancelled';button.disabled=false;button.textContent='✧　Export video';return}
+      if(recorderFinished)return;recorderFinished=true;cleanupRecording();
+      if(cancelCanvasRender){cancelCanvasRender=false;motionExportActive=false;activeCanvasRecorder=null;label.textContent='Export cancelled';setExportState('idle');return}
       lastTickWord=-1;
       cancelAnimationFrame(animationFrame);
       const blob = new Blob(chunks, { type: mime });
@@ -442,22 +482,18 @@
         const bytes=await blob.arrayBuffer();
         const result=await api.exportMp4({bytes,name:projectName,quality:qualityChoice,duration,outputDir:localStorage.getItem('capsnip.outputDir')||undefined});
         if(result?.cancelled){label.textContent='Export cancelled';return}
-        const parts=String(result.path).replace(/\\/g,'/').split('/');
-        renderedVideoPath=`file:///${parts.map((part,index)=>index===0?part:encodeURIComponent(part)).join('/')}`;
-        const outputVideo=document.getElementById('exportVideoPreview');
-        if(outputVideo){outputVideo.src=renderedVideoPath;outputVideo.load();outputVideo.play().catch(()=>{})}showRenderedEditorPreview(renderedVideoPath)
-        label.textContent='MP4 export complete · H.264 high quality';
+        completeExport(result.path);
         toast('MP4 with captions is ready');burst();
       }catch(error){label.textContent=`MP4 export failed · ${error.message}`;toast(error.message||'MP4 export failed')}
-      finally{unsubscribeProgress?.();motionExportActive=false;activeCanvasRecorder=null;button.disabled=false;button.textContent='✧　Export video'}
+      finally{unsubscribeProgress?.();motionExportActive=false;activeCanvasRecorder=null;setExportState(exportState==='exported'?'exported':'idle')}
     };
     const start = async () => {
       if(audioCtx?.state==='suspended')await audioCtx.resume().catch(()=>{});
       if(motionTheme?.category==='motion-graphic'){motionFillVideo.currentTime=0;motionFillVideo.play().catch(()=>{})}
-      video.currentTime = 0;
+      video.pause();video.loop=false;video.onended=null;video.currentTime = 0;
+      video.addEventListener('ended',stopRecorder,{once:true});
       draw(); recorder.start(1000);
-      video.play().catch(error => { recorder.stop(); toast(`Could not play source clip: ${error.message}`); });
-      video.onended = () => { if (recorder.state !== 'inactive') recorder.stop(); };
+      video.play().catch(error => { cancelCanvasRender=true;stopRecorder();toast(`Could not play source clip: ${error.message}`); });
     };
     if (video.readyState >= 2) start(); else video.addEventListener('canplay', start, { once: true });
   }
@@ -477,10 +513,10 @@
       const frameChoice=document.getElementById('exportFrameSize')?.value||'source';const [width,height]=frameChoice==='source'?[video.videoWidth,video.videoHeight]:frameChoice.split('x').map(Number);
       const result=await api.renderMotionGraphic({inputPath:media.path,templateId:theme.id,name:projectName,duration,width,height,reframeMode:document.getElementById('exportReframeMode')?.value||'fit',quality:document.getElementById('exportQuality')?.value||'high',fps:Math.min(60,Math.max(24,Number(document.getElementById('exportFps')?.value)||60)),userFontFile:fontById(captionStyleOverrides[theme.name]?.fontId)?.path,revealPace:captionStyleOverrides[theme.name]?.revealPace||'stacked',soundEffects:document.getElementById('tickEffects')?.classList.contains('on')===true,includeAudio:localStorage.getItem('capsnip.includeAudio')!=='false',outputDir:localStorage.getItem('capsnip.outputDir')||undefined,captionPosition,captionScale,segments:captionSegments.map((segment,index)=>({start:segment.start,end:segment.end,text:segment.text,position:captionPositionFor(index,theme.name),words:wordsWithTiming(segment).map(word=>({text:word.text,start:word.start,end:word.end}))}))});
       if(result?.cancelled){if(label)label.textContent='Export cancelled';toast('Export cancelled');return;}
-      const parts=String(result.path).replace(/\\/g,'/').split('/');renderedVideoPath=`file:///${parts.map((part,index)=>index===0?part:encodeURIComponent(part)).join('/')}`;const outputVideo=document.getElementById('exportVideoPreview');if(outputVideo){outputVideo.src=renderedVideoPath;outputVideo.load();outputVideo.play().catch(()=>{})}showRenderedEditorPreview(renderedVideoPath)
-      if(label)label.textContent='MP4 export complete · Motion fill and captions rendered';if(bar)bar.style.width='100%';toast('Motion graphic MP4 is ready');burst();
+      completeExport(result.path);
+      if(label)label.textContent='✓ Exported · MP4 saved';if(bar)bar.style.width='100%';toast('Motion graphic MP4 is ready');burst();
     }catch(error){if(label)label.textContent=`Export failed · ${error.message}`;toast(error.message||'Motion graphic export failed')}
-    finally{motionExportActive=false;unsubscribe?.();if(cancelButton){cancelButton.disabled=false;cancelButton.textContent='Cancel export';}if(button){button.disabled=false;button.textContent='✧　Export video'}}
+    finally{motionExportActive=false;unsubscribe?.();if(cancelButton){cancelButton.disabled=false;cancelButton.textContent='Cancel export';}setExportState(exportState==='exported'?'exported':'idle')}
   }
   async function renderSnipAiWorker(button,theme){
     if(!api.renderSnipAi)return toast('The Snip AI FFmpeg renderer is unavailable in this app build.');
@@ -492,10 +528,10 @@
       const frameChoice=document.getElementById('exportFrameSize')?.value||'source',dimensions=frameChoice==='source'?[video.videoWidth,video.videoHeight]:frameChoice.split('x').map(Number);
       const styleOverride=captionStyleOverrides[theme.name]||{},fontChoice=fontById(styleOverride.fontId);const result=await api.renderSnipAi({inputPath:media.path,templateId:theme.id,name:projectName,duration,width:dimensions[0],height:dimensions[1],frameSize:frameChoice,reframeMode:document.getElementById('exportReframeMode')?.value||'fit',quality:document.getElementById('exportQuality')?.value||'high',userFontFile:fontChoice?.path,revealPace:styleOverride.revealPace||'stacked',primaryColor:styleOverride.baseColor,accentColor:styleOverride.accentColor,soundEffects:document.getElementById('tickEffects')?.classList.contains('on')===true,includeAudio:localStorage.getItem('capsnip.includeAudio')!=='false',outputDir:localStorage.getItem('capsnip.outputDir')||undefined,fps:Math.min(60,Math.max(12,Number(document.getElementById('exportFps')?.value)||30)),captionPosition,captionScale,segments:captionSegments.map((segment,index)=>{let mixedWordIndex=0;const tokens=wordsWithTiming(segment);const position=captionPositionFor(index,theme.name);return{start:segment.start,end:Math.max(Number(segment.end)||0,tokens.at(-1)?.end||0),text:segment.text,position,words:tokens.map(word=>{const sourceStyle=theme.category==='mixed'?theme.sourceStyles[mixedWordIndex++%theme.sourceStyles.length]:null,style=sourceStyle?{fontAsset:fontChoice?.path||sourceStyle.fontAsset,fontFamily:fontChoice?.family||sourceStyle.fontFamily,fontWeight:sourceStyle.weight,fontSize:sourceStyle.size,baseColor:styleOverride.baseColor||sourceStyle.baseColor,accentColor:styleOverride.accentColor||sourceStyle.accentColor}:null;return{text:word.text,start:word.start,end:word.end,position,...(style||{})}})}})});
       if(result?.cancelled){if(label)label.textContent='Export cancelled';toast('Export cancelled');return}
-      const parts=String(result.path).replace(/\\/g,'/').split('/');renderedVideoPath=`file:///${parts.map((part,index)=>index===0?part:encodeURIComponent(part)).join('/')}`;const outputVideo=document.getElementById('exportVideoPreview');if(outputVideo){outputVideo.src=renderedVideoPath;outputVideo.load();outputVideo.play().catch(()=>{})}showRenderedEditorPreview(renderedVideoPath)
-      if(label)label.textContent=`MP4 export complete · ${theme.name} · FFmpeg`;if(bar)bar.style.width='100%';toast(`${theme.name} MP4 is ready`);burst();
+      completeExport(result.path);
+      if(label)label.textContent='✓ Exported · MP4 saved';if(bar)bar.style.width='100%';toast(`${theme.name} MP4 is ready`);burst();
     }catch(error){if(label)label.textContent=`Export failed · ${error.message}`;toast(error.message||'FFmpeg caption export failed')}
-    finally{motionExportActive=false;unsubscribe?.();if(cancelButton){cancelButton.disabled=false;cancelButton.textContent='Cancel export'}if(button){button.disabled=false;button.textContent='✧　Export video'}}
+    finally{motionExportActive=false;unsubscribe?.();if(cancelButton){cancelButton.disabled=false;cancelButton.textContent='Cancel export'}setExportState(exportState==='exported'?'exported':'idle')}
   }
   const typographyLineLayouts=[
     {top:'left',bottom:'right'},{top:'left',bottom:'center'},{top:'left',bottom:'left'},
@@ -692,18 +728,30 @@
     exportVideo.style.objectFit=(document.getElementById('exportReframeMode')?.value||localStorage.getItem('capsnip.reframeMode'))==='fill'?'cover':'contain';exportVideo.style.background='#000';
     if(renderedVideoPath){if(exportVideo.src!==renderedVideoPath){exportVideo.src=renderedVideoPath;exportVideo.load()}canvas.style.display='none';return}
     if(!video)return;const source=video.currentSrc||video.src;
-    if(exportVideo.src!==source){exportVideo.src=source;exportVideo.load();exportVideo.addEventListener('loadedmetadata',()=>{try{exportVideo.currentTime=Math.min(video.currentTime||0,Math.max(0,exportVideo.duration-.05))}catch{}updateExportPreview();if(document.getElementById('page-export')?.classList.contains('active'))exportVideo.play().catch(()=>{})},{once:true})}
+    if(exportVideo.src!==source){exportVideo.src=source;exportVideo.load();exportVideo.addEventListener('loadedmetadata',()=>{try{exportVideo.currentTime=Math.min(video.currentTime||0,Math.max(0,exportVideo.duration-.05))}catch{}updateExportPreview();if(document.getElementById('page-export')?.classList.contains('active')&&exportState!=='rendering'&&exportState!=='exported')exportVideo.play().catch(()=>{})},{once:true})}
     if(!video.videoWidth||!video.videoHeight)return;
     const frameChoice=document.getElementById('exportFrameSize')?.value||'source',[targetWidth,targetHeight]=frameChoice==='source'?[video.videoWidth,video.videoHeight]:frameChoice.split('x').map(Number);if(canvas.width!==targetWidth||canvas.height!==targetHeight){canvas.width=targetWidth;canvas.height=targetHeight}
     const ctx=canvas.getContext('2d'),t=exportVideo.readyState>=1?exportVideo.currentTime:(video.currentTime||0),segmentIndex=captionSegments.findIndex(segment=>t>=segment.start&&t<=captionDisplayEnd(segment)),segment=segmentIndex>=0?captionSegments[segmentIndex]:null,theme=(window.capsnipThemes||[]).find(item=>item.name===appliedTemplate);
     ctx.clearRect(0,0,canvas.width,canvas.height);canvas.style.display=segment&&theme?'block':'none';if(segment&&theme){const position=captionPositionFor(segmentIndex,appliedTemplate);if(theme.category==='motion-graphic'){ensureMotionFillVideo(theme);drawVideoFilledCaption(ctx,segment,t,canvas.width,canvas.height,theme,motionFillVideo,position,captionScale)}else drawCaption(ctx,segment,t,canvas.width,canvas.height,appliedTemplate,position,captionScale,segmentIndex,true)}
   }
-  window.openExportPage=()=>{if(!media||!captionSegments.length||!appliedTemplate)return toast('Generate captions before opening export');video?.pause();go('export');updateExportPreviewAspect();updateExportPreview();const exportVideo=document.getElementById('exportVideoPreview');if(exportVideo){exportVideo.volume=.9;if(exportVideo.readyState>=2&&!renderedVideoPath&&video)try{exportVideo.currentTime=Math.min(video.currentTime||0,Math.max(0,exportVideo.duration-.05))}catch{}exportVideo.play().catch(()=>{})}};
+  window.openExportPage=()=>{if(!media||!captionSegments.length||!appliedTemplate)return toast('Generate captions before opening export');video?.pause();go('export');updateExportPreviewAspect();updateExportPreview();const exportVideo=document.getElementById('exportVideoPreview');if(exportVideo){exportVideo.volume=.9;if(exportVideo.readyState>=2&&!renderedVideoPath&&video)try{exportVideo.currentTime=Math.min(video.currentTime||0,Math.max(0,exportVideo.duration-.05))}catch{}if(exportState!=='exported')exportVideo.play().catch(()=>{})}};
   document.getElementById('exportVideoPreview')?.addEventListener('timeupdate',updateExportPreview);document.getElementById('exportVideoPreview')?.addEventListener('seeked',updateExportPreview);
   document.getElementById('exportFrameSize')?.addEventListener('change',()=>{renderedVideoPath=null;updateExportPreviewAspect();updateExportPreview()});
   const exportReframe=document.getElementById('exportReframeMode'),reframeHelp=document.getElementById('exportReframeHelp');function updateReframePreview(){const mode=exportReframe?.value||'fit';localStorage.setItem('capsnip.reframeMode',mode);if(editorReframe)editorReframe.value=mode;if(settingsReframe)settingsReframe.value=mode;renderedVideoPath=null;fitPreviewToSource();if(reframeHelp)reframeHelp.textContent=mode==='fill'?'Zoom/crop edges to fill the selected frame.':'Keep full video; add black bars as needed.';updateExportPreviewAspect();updateExportPreview()}
   window.addEventListener('resize',updateExportPreviewAspect);
-  window.rendering = button => renderLocalWebM(button);
+  window.rendering = async button => {
+    if(exportRequestActive||motionExportActive||exportState==='rendering')return;
+    exportRequestActive=true;setExportState('rendering');pauseExportMedia();
+    try { await renderLocalWebM(button); }
+    catch(error){toast(error.message||'Export failed');}
+    finally {exportRequestActive=false;if(!motionExportActive)setExportState(exportState==='exported'?'exported':'idle');}
+  };
+  document.querySelector('.back')?.addEventListener('click',async()=>{
+    if(document.getElementById('page-export')?.classList.contains('active')){
+      if(exportState==='rendering'||motionExportActive){toast('Cancel the current export before returning to the editor.');return;}
+      pauseExportMedia();go('editor');setProjectTitle(projectName);syncTimeline();updateCaptionPreview();
+    }else{go('home');}
+  });
   window.addEventListener('keydown', event => {
     // Keep project shortcuts from changing editor state behind the blocking render dialog.
     if (generationBusy) { event.preventDefault(); event.stopImmediatePropagation(); return; }
